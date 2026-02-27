@@ -1,40 +1,54 @@
 #!/bin/bash
-
-#installs the pkcs11 libraries.
 set -e
 
 DEFAULT_ZIP_PATH=artifactory/libs-release-local/hsm/client.zip
-[ -z "$hsm_zip_file_path" ] && zip_path="$DEFAULT_ZIP_PATH" || zip_path="$hsm_zip_file_path"
+ZIP_PATH=${hsm_zip_file_path:-$DEFAULT_ZIP_PATH}
+ARTI_URL=${artifactory_url_env}
+echo "ARTI_URL=$ARTI_URL"
 
-echo "Download the client from $artifactory_url_env"
-echo "Zip File Path: $zip_path"
+WORK_DIR=$(pwd)
+DIR_NAME=${hsm_local_dir_name:-hsm-client}
 
-wget -q --show-progress "$artifactory_url_env/$zip_path"
-echo "Downloaded $artifactory_url_env/$zip_path"
+echo "Download the client from $ARTI_URL"
+echo "Zip File Path: $ZIP_PATH"
 
-FILE_NAME=${zip_path##*/}
-
-DIR_NAME=$hsm_local_dir_name
-
-has_parent=$(zipinfo -1 "$FILE_NAME" | awk '{split($NF,a,"/");print a[1]}' | sort -u | wc -l)
-if test "$has_parent" -eq 1; then
-  echo "Zip has a parent directory inside"
-  dirname=$(zipinfo -1 "$FILE_NAME" | awk '{split($NF,a,"/");print a[1]}' | sort -u | head -n 1)
-  echo "Unzip directory"
-  unzip $FILE_NAME
-  echo "Renaming directory"
-  mv -v $dirname $DIR_NAME
+# Si déjà installé → ne pas réinstaller
+if [ -d "$DIR_NAME" ] && [ "$(ls -A $DIR_NAME 2>/dev/null)" ]; then
+  echo "HSM already installed. Skipping installation."
 else
-  echo "Zip has no parent directory inside"
-  echo "Creating destination directory"
-  mkdir "$DIR_NAME"
-  echo "Unzip to destination directory"
-  unzip -d "$DIR_NAME" $FILE_NAME
+  echo "Downloading HSM client..."
+  wget -q --show-progress "$ARTI_URL" -O client.zip
+  echo "Unzipping..."
+  unzip -q client.zip
+
+  echo "Preparing target directory..."
+  rm -rf $DIR_NAME
+  mkdir -p $DIR_NAME
+
+  echo "Copying files to volume..."
+  cp -r client/* $DIR_NAME/
+
+  echo "Cleaning temp files..."
+  rm -rf client
+  rm -f client.zip
+
+  echo "Installing HSM libraries..."
+  cd $DIR_NAME
+  chmod +x install.sh
+  ./install.sh
+  cd $WORK_DIR
+
+  echo "HSM installation completed successfully."
 fi
 
-echo "Attempting to install"
-cd ./$DIR_NAME && chmod +x install.sh && sudo ./install.sh
-echo "Installation complete"
-cd $work_dir
+#echo "Starting application..."
+#exec java -jar kernel-keymanager-service-1.1.5.5-P3.jar
 
-exec "$@"
+echo "Starting application..."
+echo "Starting application..."
+
+exec java -jar \
+  -Dspring.cloud.config.uri=${spring_config_url_env} \
+  -Dspring.profiles.active=${active_profile_env} \
+  -Dspring.cloud.config.label=${spring_config_label_env} \
+  /home/mosip/app.jar
